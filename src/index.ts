@@ -27,22 +27,49 @@ export default {
       const packageName = match[1];
 
       try {
-        await env.KV.put("asar", "4.0.1");
-        const version = await env.KV.get(packageName);
+        let version = await env.KV.get(packageName);
 
-        if (version) {
-          const redirectPath = `/${packageName}/v${version}/index.html`;
-          const redirectUrl = new URL(
-            redirectPath,
-            "https://packages.electronjs.org"
+        if (!version) {
+          console.info(
+            `No version found for ${packageName} in KV. Querying npm registry...`
+          );
+          const _req = await fetch(
+            `https://registry.npmjs.org/@electron/${packageName}/latest`
           );
 
-          redirectUrl.search = url.search;
+          if (_req.ok) {
+            const data: any = await _req.json();
+            const npmVersion = data.version;
 
-          return Response.redirect(redirectUrl.toString(), 302);
+            if (npmVersion) {
+              await env.KV.put(packageName, npmVersion, {
+                expirationTtl: 600, // 10 minutes
+              });
+              version = npmVersion;
+            } else {
+              console.warn(
+                `No version found for ${packageName} in npm registry response.`
+              );
+            }
+          } else {
+            console.warn(
+              "failed to look up package from npm registry",
+              _req.status
+            );
+          }
         } else {
-          console.info(`No version found in KV for package: ${packageName}`);
+          console.info(`Found version ${version} for ${packageName} in KV`);
         }
+
+        const redirectPath = `/${packageName}/v${version}/index.html`;
+        const redirectUrl = new URL(
+          redirectPath,
+          "https://packages.electronjs.org"
+        );
+
+        redirectUrl.search = url.search;
+
+        return Response.redirect(redirectUrl.toString(), 302);
       } catch (error) {
         console.warn(
           `Error looking up package version for ${packageName}:`,
